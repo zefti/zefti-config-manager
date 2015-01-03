@@ -1,0 +1,10 @@
+{
+  "name" : "zefti-config-manager",
+  "description" : "Config Management",
+  "author" : "Ryan Ogle",
+  "dependencies" : {
+    "underscore" : "latest"
+  },
+  "private" : false,
+  "version" : "0.0.1"
+}
