@@ -1,6 +1,7 @@
 var path = require('path');
 var fs = require('fs');
 var _ = require('underscore');
+var utils = require('zefti-utils');
 var logger = require('zefti-logger');
 var appDir = path.dirname(require.main.filename);
 var configDir = path.join(appDir, 'config');
@@ -16,13 +17,53 @@ var extensions = [
 ]
 
 exports.init = function(options){
-  console.log(options);
+  var configModel = options.configModel || null;
   if (options && options.configModule) configDir = path.join(appDir, '/node_modules', options.configModule);
   if ((options && options.env) || process.env.env) env = process.env.env || options.env;
   var baseConfigFile = path.join(configDir, env);
   var config = readConfig(options, {}, baseConfigFile);
-  return config;
-}
+  var localConfig = {};
+  if (process.env.localConfig) {
+    if (utils.type(process.env.localConfig) === 'string') {
+      try {
+        localConfig = JSON.parse(process.env.localConfig);
+        for (var field in localConfig) {
+          config[field] = localConfig[field];
+        }
+      } catch (e) {
+        return logger.sysError('remoteConfig is not parsable JSON');
+      }
+    } else if (utils.type(process.env.localConfig) === 'object'){
+      localConfig = process.env.localConfig
+    } else {
+      return logger.sysError('localConfig is of unknown type');
+    }
+  }
+  if (options && options.remoteConfig) {
+    configModel.findOne({}, function(err, remoteConfig){
+      if (err) throw new Error('could not connect to remoteConfig');
+      if (utils.type(remoteConfig) === 'string'){
+        try {
+          var parsedRemoteConfig = JSON.parse(remoteConfig);
+          for (var field in parsedRemoteConfig) {
+            config[field] = parsedRemoteConfig[field];
+          }
+        } catch(e) {
+          return logger.sysError('remoteConfig is not parsable JSON');
+        }
+      } else if (utils.type(remoteConfig) === 'object') {
+       //do nothing
+      } else {
+        return logger.sysError('remoteConfig is of unknown type');
+      }
+      return _.extend(config, remoteConfig, localConfig);
+    });
+  } else {
+    return _.extend(config, localConfig);
+  }
+};
+
+
 
 function readConfig(options, currentConfig, newConfigPath){
   var validFile = null;
@@ -42,7 +83,7 @@ function readConfig(options, currentConfig, newConfigPath){
     try {
       parsedConfig = JSON.parse(data)
     } catch (e) {
-      return logger.sysError('file: ' + validFile + ' is not parsable JSON')
+      return logger.sysError('file: ' + validFile + ' is not parsable JSON');
     }
     if (!parsedConfig) return logger.sysError('config-manager, cound not read file: ' + validFile);
     inherit = parsedConfig.inherit;
