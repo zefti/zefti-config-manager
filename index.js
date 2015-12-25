@@ -6,41 +6,46 @@ var logger = require('zefti-logger');
 var appDir = path.dirname(require.main.filename);
 var configDir = path.join(appDir, 'config');
 var env = 'dev';
-/*
- * Extensions to search for.  In order of significance (last items are the most significant
- * ie: if there is a .js and .json file in the same folder, and .json is listed after .js in
- * the array, .json will be used
- */
-var extensions = [
-    '.js'
-  , '.json'
-]
+var zeftiMongo = require('zefti-mongo');
+var localPrefix = 'zefti';
 
-exports.init = function(options){
-  var configModel = options.configModel || null;
-  if (options && options.configModule) configDir = path.join(appDir, '/node_modules', options.configModule);
-  if ((options && options.env) || process.env.env) env = process.env.env || options.env;
-  var baseConfigFile = path.join(configDir, env);
-  var config = readConfig(options, {}, baseConfigFile);
+module.exports = function(options, cb){
+  var config = {};
   var localConfig = {};
-  if (process.env.localConfig) {
-    if (utils.type(process.env.localConfig) === 'string') {
-      try {
-        localConfig = JSON.parse(process.env.localConfig);
-        for (var field in localConfig) {
-          config[field] = localConfig[field];
-        }
-      } catch (e) {
-        return logger.sysError('remoteConfig is not parsable JSON');
-      }
-    } else if (utils.type(process.env.localConfig) === 'object'){
-      localConfig = process.env.localConfig
+  var instantConfig = {};
+  var remoteConfigServerCreds = options.remoteConfigServerCreds;
+  var configPath = options.configPath;
+  var env = options.env;
+  var configServer = null;
+
+  if (remoteConfigServerCreds) {
+    configServer = zeftiMongo(remoteConfigServerCreds);
+  }
+
+  /* If config files are specified, load them */
+  if (configPath) {
+    var localConfig = readFiles(configPath);
+    var activeEnvConfig = localConfig.env[options.env];
+
+    if (!activeEnvConfig.inherit) {
+      localConfig.settings = activeEnvConfig;
     } else {
-      return logger.sysError('localConfig is of unknown type');
+      var finalCurrentSettings = inheritConfig(localConfig, localConfig.env[activeEnvConfig.inherit], localConfig.env[options.env]);
+      localConfig.settings = finalCurrentSettings
     }
   }
-  if (options && options.remoteConfig) {
-    configModel.findOne({}, function(err, remoteConfig){
+
+  /* If environmental config values are specified, load them*/
+  var prefixLength = localPrefix.length;
+  for (var key in process.env) {
+    if (key.substr(0, prefixLength) === localPrefix) {
+      instantConfig[key.substr(prefixLength)] = process.env[key];
+    }
+  }
+
+
+  if (configServer) {
+    configServer.findOne({env:env}, function(err, remoteConfig){
       if (err) throw new Error('could not connect to remoteConfig');
       if (utils.type(remoteConfig) === 'string'){
         try {
@@ -52,50 +57,53 @@ exports.init = function(options){
           return logger.sysError('remoteConfig is not parsable JSON');
         }
       } else if (utils.type(remoteConfig) === 'object') {
-       //do nothing
+        //do nothing
       } else {
-        return logger.sysError('remoteConfig is of unknown type');
+        console.log('NO REMOTE CONFIG FOUND');
+        //return logger.sysError('remoteConfig is of unknown type');
+        cb(_.extend(config, localConfig, instantConfig));
       }
-      return _.extend(config, remoteConfig, localConfig);
+      console.log('extending config, local, remote, and instant')
+      cb(_.extend(config, localConfig, remoteConfig, instantConfig));
     });
   } else {
-    return _.extend(config, localConfig);
+    console.log('extending config, local, instant')
+    cb(_.extend(config, localConfig, instantConfig));
   }
 };
 
-
-
-function readConfig(options, currentConfig, newConfigPath){
-  var validFile = null;
-  var parsedConfig = null;
-  var inherit = null;
-  if (newConfigPath.slice(-3) === '.js' || newConfigPath.slice(-5) === '.json') {
-    validFile = newConfigPath;
-  } else {
-    extensions.forEach(function(extension){
-      var exists = fs.existsSync(newConfigPath + extension);
-      if (exists) validFile = newConfigPath + extension;
-    });
-  }
-
-  if (validFile) {
-    var data = fs.readFileSync(validFile, {encoding:'utf8'});
-    try {
-      parsedConfig = JSON.parse(data)
-    } catch (e) {
-      return logger.sysError('file: ' + validFile + ' is not parsable JSON');
-    }
-    if (!parsedConfig) return logger.sysError('config-manager, cound not read file: ' + validFile);
-    inherit = parsedConfig.inherit;
-      _.extend(parsedConfig, currentConfig);
-      if (inherit) {
-        readConfig(options, parsedConfig, path.join(configDir, inherit))
-      } else {
-        if (options && options.logConfig) logger.info('config loaded: ' + JSON.stringify(parsedConfig));
-        exports.data = parsedConfig;
-        return parsedConfig;
+function readFiles(configPath) {
+  var libFiles = fs.readdirSync(configPath);
+  var result = {};
+  libFiles.forEach(function(libFile){
+    if (libFile[0] !== '.') {
+      var itemPath = utils.createPath(configPath, libFile);
+      //console.log(itemPath);
+      var stat = fs.statSync(itemPath);
+      if (stat.isDirectory()) {
+        var innerFiles = fs.readdirSync(itemPath);
+        //console.log(innerFiles);
+        innerFiles.forEach(function (file) {
+          var name = file.slice(0, -file.split('.').pop().length - 1);
+          if (!result[libFile]) result[libFile] = {};
+          //console.log('./lib/' + libFile + '/' + file);
+          result[libFile][name] = require(path.join(configPath, libFile, file));
+        });
       }
+    }
+  });
+  return result;
+}
+
+
+function inheritConfig(localConfig, orig, extension) {
+  if (!extension) throw new Error ('Inherit does not exist');
+  delete extension.inherit;
+  _.extend(orig, extension);
+  if (orig.inherit) {
+    var x = inheritConfig(localConfig.env[orig.inherit], orig);
+    return x;
   } else {
-    logger.sysError('config-manager, not a valid file for config provided: ' + newConfigPath);
+    return orig;
   }
 }

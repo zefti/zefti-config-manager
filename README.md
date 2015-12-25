@@ -5,22 +5,31 @@ node app configuration package
 
 usage
 =====
+Step 1 - require zefti-config-manager
+var configManager = require('zefti-config-manager');
 
-var zefti-config = require('zefti-config');
-var config = config.init({configModule:'zefti-config', env:'prod'});
+Step 2 - provide config root folder (if config is stored in json files)
+var configLocation = "/my/config/here";
 
-init options
-============
-configDir: The directory where config variables are stored
-env: The environment to use (must match the file in the config directory)
+Step 3 - provide remove mongo server config (if remote control of config values is required)
+var remoteConfigServerCreds = {
+    'replicaSet': ['localhost:27017']
+  , 'collection': 'config'
+  , 'database': 'test'
+};
+
+Step 4 - Instantiate zefti-config-manager
+configManager({configFolder: configFolderLocation, configRemote : remoteConfigServerCreds});
 
 
-notes
-=====
+fileTypes
+=========
 Only .js & .json extensions are supported for files
 
 
-
-Create a config folder in the root folder of the app.
-
-/prod/prodtest
+Order of Operations
+===================
+In order of most relevant to least relevant:
+1. Local environment variables
+2. Remote config (mongo database)
+3. Config JSON files
