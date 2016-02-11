@@ -3,23 +3,23 @@ var fs = require('fs');
 var _ = require('underscore');
 var utils = require('zefti-utils');
 var logger = require('zefti-logger');
-var appDir = path.dirname(require.main.filename);
-var configDir = path.join(appDir, 'config');
 var env = 'dev';
 var zeftiMongo = require('zefti-mongo');
 var localPrefix = 'zefti';
+var common = require('zefti-common');
 
 module.exports = function(options, cb){
-  var config = {};
   var localConfig = {};
   var instantConfig = {};
+  var remoteConfig = {};
+  var finalRemoteConfig = {};
   var remoteConfigServerCreds = options.remoteConfigServerCreds;
   var configPath = options.configPath;
   var env = options.env;
   var configServer = null;
 
   if (remoteConfigServerCreds) {
-    configServer = zeftiMongo(remoteConfigServerCreds);
+    configServer = zeftiMongo({dataSource: remoteConfigServerCreds});
   }
 
   /* If config files are specified, load them */
@@ -31,7 +31,7 @@ module.exports = function(options, cb){
       localConfig.settings = activeEnvConfig;
     } else {
       var finalCurrentSettings = inheritConfig(localConfig, localConfig.env[activeEnvConfig.inherit], localConfig.env[options.env]);
-      localConfig.settings = finalCurrentSettings
+      localConfig.settings = finalCurrentSettings;
     }
   }
 
@@ -43,32 +43,30 @@ module.exports = function(options, cb){
     }
   }
 
-
   if (configServer) {
-    configServer.findOne({env:env}, function(err, remoteConfig){
-      if (err) throw new Error('could not connect to remoteConfig');
-      if (utils.type(remoteConfig) === 'string'){
-        try {
-          var parsedRemoteConfig = JSON.parse(remoteConfig);
-          for (var field in parsedRemoteConfig) {
-            config[field] = parsedRemoteConfig[field];
-          }
-        } catch(e) {
-          return logger.sysError('remoteConfig is not parsable JSON');
+    configServer.find({}, function(err, cursor){
+      cursor.toArray(function(err, configDocs){
+        if (err) throw new Error('could not connect to remoteConfig');
+        configDocs.forEach(function(configDoc){
+          if (configDoc.env) remoteConfig[configDoc.env] = configDoc;
+        });
+        var activeRemoteConfig = remoteConfig[env] || {};
+
+        if (!activeRemoteConfig.inherit) {
+          finalRemoteConfig = activeRemoteConfig;
+        } else {
+          finalRemoteConfig = inheritConfig(remoteConfig, remoteConfig[activeRemoteConfig.inherit], activeRemoteConfig);
         }
-      } else if (utils.type(remoteConfig) === 'object') {
-        //do nothing
-      } else {
-        console.log('NO REMOTE CONFIG FOUND');
-        //return logger.sysError('remoteConfig is of unknown type');
-        cb(_.extend(config, localConfig, instantConfig));
-      }
-      console.log('extending config, local, remote, and instant')
-      cb(_.extend(config, localConfig, remoteConfig, instantConfig));
+        delete finalRemoteConfig._id;
+        common.deepMerge(localConfig.settings, finalRemoteConfig);
+        common.deepMerge(localConfig.settings, instantConfig);
+        cb(localConfig);
+      });
     });
   } else {
-    console.log('extending config, local, instant')
-    cb(_.extend(config, localConfig, instantConfig));
+    common.deepMerge(localConfig.settings, finalRemoteConfig);
+    common.deepMerge(localConfig.settings, instantConfig);
+    cb(localConfig);
   }
 };
 
@@ -78,16 +76,15 @@ function readFiles(configPath) {
   libFiles.forEach(function(libFile){
     if (libFile[0] !== '.') {
       var itemPath = utils.createPath(configPath, libFile);
-      //console.log(itemPath);
       var stat = fs.statSync(itemPath);
       if (stat.isDirectory()) {
         var innerFiles = fs.readdirSync(itemPath);
-        //console.log(innerFiles);
         innerFiles.forEach(function (file) {
           var name = file.slice(0, -file.split('.').pop().length - 1);
           if (!result[libFile]) result[libFile] = {};
-          //console.log('./lib/' + libFile + '/' + file);
           result[libFile][name] = require(path.join(configPath, libFile, file));
+          if (libFile === 'env') {
+          }
         });
       }
     }
@@ -95,14 +92,12 @@ function readFiles(configPath) {
   return result;
 }
 
-
 function inheritConfig(localConfig, orig, extension) {
   if (!extension) throw new Error ('Inherit does not exist');
   delete extension.inherit;
-  _.extend(orig, extension);
+  common.deepMerge(orig, extension);
   if (orig.inherit) {
-    var x = inheritConfig(localConfig.env[orig.inherit], orig);
-    return x;
+    return inheritConfig(localConfig, localConfig.env[orig.inherit], orig);
   } else {
     return orig;
   }
