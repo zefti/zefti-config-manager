@@ -7,8 +7,11 @@ var env = 'dev';
 var zeftiMongo = require('zefti-mongo');
 var localPrefix = 'zefti';
 var common = require('zefti-common');
+var loadedConfig = null;
 
 module.exports = function(options, cb){
+  if (loadedConfig) return loadedConfig;
+  if (!options) options = {};
   var localConfig = {};
   var instantConfig = {};
   var remoteConfig = {};
@@ -17,6 +20,7 @@ module.exports = function(options, cb){
   var configPath = options.configPath;
   var env = options.env;
   var configServer = null;
+  var localConfig = {settings:{}};
 
   if (remoteConfigServerCreds) {
     configServer = zeftiMongo({dataSource: remoteConfigServerCreds});
@@ -24,7 +28,7 @@ module.exports = function(options, cb){
 
   /* If config files are specified, load them */
   if (configPath) {
-    var localConfig = readFiles(configPath);
+    localConfig = readFiles(configPath);
     var activeEnvConfig = localConfig.env[options.env];
 
     if (!activeEnvConfig.inherit) {
@@ -60,13 +64,16 @@ module.exports = function(options, cb){
         delete finalRemoteConfig._id;
         common.deepMerge(localConfig.settings, finalRemoteConfig);
         common.deepMerge(localConfig.settings, instantConfig);
+        loadedConfig = localConfig;
         cb(localConfig);
       });
     });
   } else {
     common.deepMerge(localConfig.settings, finalRemoteConfig);
     common.deepMerge(localConfig.settings, instantConfig);
-    cb(localConfig);
+    loadedConfig = localConfig;
+    if (cb) return cb(localConfig);
+    return (localConfig);
   }
 };
 
