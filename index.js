@@ -6,7 +6,6 @@ var logger = require('zefti-logger');
 var env = 'dev';
 var zeftiMongo = require('zefti-mongo');
 var localPrefix = 'zefti';
-var common = require('zefti-common');
 var loadedConfig = null;
 
 module.exports = function(options, cb){
@@ -62,15 +61,15 @@ module.exports = function(options, cb){
           finalRemoteConfig = inheritConfig(remoteConfig, remoteConfig[activeRemoteConfig.inherit], activeRemoteConfig);
         }
         delete finalRemoteConfig._id;
-        common.deepMerge(localConfig.settings, finalRemoteConfig);
-        common.deepMerge(localConfig.settings, instantConfig);
+        utils.deepMerge(localConfig.settings, finalRemoteConfig);
+        utils.deepMerge(localConfig.settings, instantConfig);
         loadedConfig = localConfig;
         cb(localConfig);
       });
     });
   } else {
-    common.deepMerge(localConfig.settings, finalRemoteConfig);
-    common.deepMerge(localConfig.settings, instantConfig);
+    utils.deepMerge(localConfig.settings, finalRemoteConfig);
+    utils.deepMerge(localConfig.settings, instantConfig);
     loadedConfig = localConfig;
     if (cb) return cb(localConfig);
     return (localConfig);
@@ -102,7 +101,7 @@ function readFiles(configPath) {
 function inheritConfig(localConfig, orig, extension) {
   if (!extension) throw new Error ('Inherit does not exist');
   delete extension.inherit;
-  common.deepMerge(orig, extension);
+  utils.deepMerge(orig, extension);
   if (orig.inherit) {
     return inheritConfig(localConfig, localConfig.env[orig.inherit], orig);
   } else {
